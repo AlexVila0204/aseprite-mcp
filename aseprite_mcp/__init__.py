@@ -31,6 +31,15 @@ replace_color / remap_colors_in_cel_range (hit flashes, recolours), export_anima
 previews, scaled, on a background), compare_frames and get_bounds (did a part move? where is it?). \
 run_lua_script is the last resort.
 
+Model textures (a UV template from a 3D tool, one flat color per face): create_canvas at the template's \
+exact size, import_image_as_layer the template as the bottom layer, and paint on layers above it. Paint \
+one face at a time with draw_rows and clip="x,y,w,h" set to that face's rectangle. Light comes from above: \
+top faces take the lightest ramp steps, side faces the middle ones, bottom faces the darkest, and inside a \
+face the top edge is lighter than the bottom. Faces that meet on the model continue each other's colors \
+across the shared edge. No outlines around faces, and every face gets at least two colors. Finish with \
+clip_to_mask against the template layer, hide the template layer with set_layer_visibility, and \
+export_sprite to PNG.
+
 Animate pose to pose: redraw each key pose (anticipation, action, follow-through) on its own frame, \
 with the whole body involved and the feet on one ground line unless airborne. copy_frame, \
 erase_region the part that moves, then redraw it. Tween or offset cels only for rigid objects and \

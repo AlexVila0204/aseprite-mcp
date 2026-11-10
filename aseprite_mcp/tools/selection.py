@@ -270,6 +270,90 @@ async def erase_region(
 
 
 @mcp.tool()
+async def clip_to_mask(
+    filename: str,
+    layer_name: str,
+    mask_layer: str,
+    frame_index: int = 1,
+    mask_frame_index: int = 1,
+) -> str:
+    """Erase every pixel of a layer that lies where the mask layer is transparent.
+
+    Trims paint that spilled outside a shape, whatever tool drew it. For a
+    model texture, import the UV template as a layer (import_image_as_layer),
+    paint on layers above it, then clip each painted layer to the template so
+    nothing is left outside the faces.
+
+    Args:
+        filename: Aseprite file to modify
+        layer_name: Layer to trim
+        mask_layer: Layer whose opaque pixels mark what to keep
+        frame_index: Frame of the layer to trim, starting at 1
+        mask_frame_index: Frame of the mask layer to read, starting at 1
+    """
+    if not os.path.exists(filename):
+        return f"File {filename} not found"
+
+    script = f"""
+    {FIND_LAYER}
+    {NORMALIZE_CEL}
+    local spr = app.activeSprite
+    if not spr then print("ERROR:No active sprite") return end
+
+    local idx, mask_idx = {frame_index}, {mask_frame_index}
+    if idx < 1 or idx > #spr.frames or mask_idx < 1 or mask_idx > #spr.frames then
+        print("ERROR:Frame index out of range") return
+    end
+
+    local target = find_layer(spr, "{lua_escape(layer_name)}")
+    if not target then print("ERROR:Layer not found") return end
+    local mask = find_layer(spr, "{lua_escape(mask_layer)}")
+    if not mask then print("ERROR:Mask layer not found") return end
+    local mask_cel = mask:cel(spr.frames[mask_idx])
+    if not mask_cel then print("ERROR:Mask layer has no cel at that frame") return end
+
+    local pc = app.pixelColor
+    local function is_clear(pixel)
+        if spr.colorMode == ColorMode.RGB then return pc.rgbaA(pixel) == 0 end
+        if spr.colorMode == ColorMode.GRAY then return pc.grayaA(pixel) == 0 end
+        return pixel == spr.transparentColor
+    end
+    local clear = spr.colorMode == ColorMode.INDEXED and spr.transparentColor or 0
+
+    local mask_img, mx, my = mask_cel.image, mask_cel.position.x, mask_cel.position.y
+    local function masked_out(x, y)
+        local lx, ly = x - mx, y - my
+        if lx < 0 or ly < 0 or lx >= mask_img.width or ly >= mask_img.height then return true end
+        return is_clear(mask_img:getPixel(lx, ly))
+    end
+
+    local erased = 0
+    app.transaction(function()
+        local cel = normalize_cel(spr, target, spr.frames[idx], false)
+        if not cel then print("ERROR:No cel at that layer/frame") return end
+        local img = cel.image
+        for py = 0, img.height - 1 do
+            for px = 0, img.width - 1 do
+                if not is_clear(img:getPixel(px, py)) and masked_out(px, py) then
+                    img:putPixel(px, py, clear)
+                    erased = erased + 1
+                end
+            end
+        end
+    end)
+
+    spr:saveAs(spr.filename)
+    print("ERASED:" .. erased)
+    """
+
+    success, output = AsepriteCommand.execute_lua_script_checked(script, filename)
+    if not success:
+        return f"Failed to clip to mask: {output}"
+    erased = next((line[len("ERASED:"):] for line in output.splitlines() if line.startswith("ERASED:")), "0")
+    return f"Erased {erased} pixels of '{layer_name}' outside '{mask_layer}' on frame {frame_index} in {filename}"
+
+
+@mcp.tool()
 async def erase_color(
     filename: str,
     layer_name: str,

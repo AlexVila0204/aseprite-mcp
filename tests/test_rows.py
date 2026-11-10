@@ -82,3 +82,18 @@ def test_read_rows_limits(sprite):
     assert "at most" in run(pixel_read.read_rows(sprite, 0, 0, 200, 200))
     assert "must be > 0" in run(pixel_read.read_rows(sprite, 0, 0, 0, 4))
     assert "not found" in run(pixel_read.read_rows(sprite, 0, 0, 4, 4, 1, "missing"))
+
+
+def test_draw_rows_clip_keeps_paint_inside_the_rectangle(sprite):
+    ok(run(canvas.add_layer(sprite, "clipped")))
+    result = ok(run(drawing.draw_rows(sprite, "clipped", 1, 0, 0, ["SSSS", "SSSS"], LEGEND, "#000000", True, "1,0,2,2")))
+    assert "Drew 4 pixels" in result and "Clipped 4 pixels outside 1,0,2,2" in result
+    assert color_at(sprite, 1, 0, "clipped").startswith("#f4b41b")
+    assert "a=0" in color_at(sprite, 0, 0, "clipped"), "pixels left of the clip stay untouched"
+    assert "a=0" in color_at(sprite, 3, 1, "clipped"), "pixels right of the clip stay untouched"
+    assert "a=0" in color_at(sprite, 1, 2, "clipped"), "the outline is clipped too"
+
+
+def test_draw_rows_rejects_bad_clip(sprite):
+    assert run(drawing.draw_rows(sprite, "face", 1, 0, 0, ["K"], LEGEND, None, True, "1,2,3")).startswith("Invalid region")
+    assert run(drawing.draw_rows(sprite, "face", 1, 0, 0, ["K"], LEGEND, None, True, "10,10,2,2")).startswith("Invalid clip")

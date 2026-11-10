@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 from ..core.commands import AsepriteCommand, lua_escape
 from ..core.lua import FIND_LAYER, NORMALIZE_CEL, PSET
 from ..core.colors import parse_hex_color
+from ..core.region import parse_region
 from .. import mcp
 
 
@@ -1145,6 +1146,12 @@ def _outline_of(pixels: dict[tuple[int, int], tuple], rgba: tuple) -> dict[tuple
     return edge
 
 
+def _inside(pixels: dict[tuple[int, int], tuple], rect: tuple[int, int, int, int]) -> dict[tuple[int, int], tuple]:
+    """The pixels that fall inside rect (x, y, w, h)."""
+    x, y, w, h = rect
+    return {(px, py): c for (px, py), c in pixels.items() if x <= px < x + w and y <= py < y + h}
+
+
 def _paint_pixels(filename: str, layer_name: str, frame_index: int,
                   pixels: dict[tuple[int, int], tuple], create_if_missing: bool):
     """Put sprite-global pixels {(x, y): rgba} on a layer/frame in one run.
@@ -1209,6 +1216,7 @@ async def draw_rows(
     legend: Dict[str, Any],
     outline: str | None = None,
     create_if_missing: bool = True,
+    clip: str = "",
 ) -> str:
     """Draw pixels from rows of characters, like ASCII art: one character per pixel.
 
@@ -1237,11 +1245,17 @@ async def draw_rows(
             the drawn pixels (sides only, not diagonals), drawn over whatever
             is there, e.g. to separate an object from the scene behind it
         create_if_missing: Create the cel if it does not exist
+        clip: Optional "x,y,w,h" rectangle (sprite pixels); pixels and outline
+            outside it are not drawn. Use a face's rectangle from a UV template
+            so paint never spills onto the neighbouring face
     """
     if not os.path.exists(filename):
         return f"File {filename} not found"
     if not rows:
         return "Invalid rows: give at least one row"
+    clip_rect = parse_region(clip)
+    if isinstance(clip_rect, str):
+        return clip_rect
     width = len(rows[0])
     for i, row in enumerate(rows):
         if len(row) != width:
@@ -1275,6 +1289,11 @@ async def draw_rows(
         return "Invalid rows: nothing to draw; every character is '.' or missing from the legend"
 
     edge = _outline_of(pixels, outline_rgba) if outline_rgba else {}
+    requested = len(pixels)
+    if clip_rect:
+        pixels, edge = _inside(pixels, clip_rect), _inside(edge, clip_rect)
+        if not pixels:
+            return f"Invalid clip: none of the rows fall inside {clip}"
 
     success, output = _paint_pixels(filename, layer_name, frame_index, {**pixels, **edge},
                                     create_if_missing)
@@ -1283,6 +1302,8 @@ async def draw_rows(
     text = (f"Drew {len(pixels)} pixels ({width}x{len(rows)} rows at {x},{y})"
             f"{f' and a {len(edge)} px outline' if edge else ''} on '{layer_name}' "
             f"frame {frame_index} in {filename}")
+    if requested > len(pixels):
+        text += f". Clipped {requested - len(pixels)} pixels outside {clip}"
     if unknown:
         listed = ", ".join(f"{ch!r} ({n} px)" for ch, n in unknown.items())
         text += f". Skipped characters missing from the legend: {listed}"
